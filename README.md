@@ -153,65 +153,6 @@ Edit `main/config.h` to adjust system parameters:
 4. **Table Overflow**: Flood with packets from non-existent nodes
 5. **Timestamp Manipulation**: Send packets with invalid timestamps
 
-## Data Collection and Analysis
-
-### Serial Logging
-
-Capture real-time telemetry:
-
-```bash
-./capture_serial.sh /dev/ttyUSB0
-```
-
-Output files:
-- `normal_YYYYMMDD_HHMMSS.txt` - Baseline operation
-- `replay_attack_YYYYMMDD_HHMMSS.txt` - Replay attack scenario
-- `spoofing_attack_YYYYMMDD_HHMMSS.txt` - Spoofing scenario
-- etc.
-
-### Visualization and Analysis
-
-Python scripts for metric analysis:
-
-```bash
-# Neighbor availability and communication quality
-python compare_neighbor_availability.py
-
-# Flocking stability metrics
-python compare_flocking.py
-
-# Task timing analysis
-python compare_task_timing.py
-```
-
-Generated metrics include:
-- **Neighbor Availability**: Percentage of time neighbors are visible
-- **Packet Loss Rate**: Missing sequence number gaps
-- **Sequence Gaps**: Count of discontinuities per neighbor
-- **Flocking Stability**: Centroid distance, minimum separation, heading alignment
-- **Task Timing**: Execution period, jitter, worst-case latency
-- **Energy Consumption**: Estimated based on duty cycle and TX power
-
-## Performance Metrics
-
-### Timing Requirements
-
-| Metric | Target | Typical |
-|--------|--------|---------|
-| Physics Task Period | 20 ms | 19.8-20.2 ms |
-| Physics Task Jitter | <1 ms | 0.3 ms |
-| Flocking Task Period | 100 ms | 99.5-100.5 ms |
-| Radio TX Interval | 6000 ms | 6000±10 ms |
-| End-to-end Latency | <50 ms | 35 ms |
-
-### Flocking Stability
-
-| Scenario | Centroid Distance | Min Separation | Heading Alignment |
-|----------|-------------------|----------------|-------------------|
-| Normal | Stable (±50mm) | >500mm | >85% |
-| Replay Attack | Degraded (±200mm) | >400mm | >70% |
-| Table Overflow | Critical (±500mm) | >300mm | >50% |
-
 ## Project Structure
 
 ```
