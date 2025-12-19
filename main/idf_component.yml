@@ -1,0 +1,3 @@
+dependencies:
+  jgromes/radiolib: "*"
+  espressif/mqtt: "^1.0.0"
