@@ -1,4 +1,5 @@
-# Project Outline
+# Distributed Flocking - ESP32 Drone Swarm
+
 ## Project Goals
 - Run a simulated drone on each ESP32 using FreeRTOS tasks
 - Exchange neighbor state over LoRa, publish state via MQTT over Wi-Fi
@@ -29,117 +30,78 @@
 - '''neighbour_table[]'''
 - '''flock_cmd_t'''
 
-Implementation
-1. Environment
+## Implementation
+
+### 1. Environment
 Set up ESP-IDF toolchain
 Create new project repository
 Configure FreeRTOS task priorities & stack sizes
 Implement dummy periodic task using vTaskDelayUntil
 Verify timing via UART prints
 
-2. Core Task Skeleton + Timing
+### 2. Core Task Skeleton + Timing
 Create Physics, Flocking, Radio, and Telemetry tasks
 Ensure each runs at required frequency
 Implement basic timing logger (period, jitter)
 Test scheduling & priority interactions
 
-3. Physics Model
+### 3. Physics Model
 Implement 50 Hz fixed-step integrator
 Use units mm, mm/s, centi-degrees
 Clamp x/y/z to simulation boundary
 Add velocity limits & yaw wrap-around
 Test using static / circular motion pattern
 
-4. LoRa Neighbour Exchange
-
+### 4. LoRa Neighbour Exchange
 Implement LoRa packet encode
-
 Implement decode logic
-
 Add placeholder for AES-CMAC
-
 Maintain neighbour table (insert, update, timeout)
-
 Set LoRa transmission rate (2–5 Hz)
-
 Test between two ESP32 boards
 
-5. MQTT Telemetry
-
+### 5. MQTT Telemetry
 Implement Wi-Fi connect + retry logic
-
 Initialise MQTT client
-
 Encode JSON state payload
-
 Publish to topic .../flock/<node>/state
-
 Validate using external subscriber
-
 Verify with visualiser
 
-6. Flocking Controller
-
+### 6. Flocking Controller
 Implement cohesion
-
 Implement alignment
-
 Implement separation
-
 Tune rule weights
-
 Add acceleration & yaw-rate limits
-
 Validate stability inside visualiser
-
 Log metrics (centroid distance, min separation, heading alignment)
 
-7. Security (AES-CMAC) + Threat Model
-
+### 7. Security (AES-CMAC) + Threat Model
 Generate team AES-128 key
-
 Implement AES-CMAC over packet bytes
-
 Append truncated MAC to transmitted packets
-
 Verify MAC on receive, drop invalid packets
-
 Document adversary model, attack surface, assets
 
-8. Adversarial Testing
-
+### 8. Adversarial Testing
 Replay attack
-
 Packet spoofing (position/velocity tampering)
-
 Timestamp manipulation
-
 Controlled flooding (within duty-cycle constraints)
-
 Run + log each attack
-
 Compare flock metrics to baseline
 
-9. Measurement & Evaluation
-
+### 9. Measurement & Evaluation
 Measure task timing (period, jitter)
-
 Log LoRa packet loss / neighbour dropouts
-
 Evaluate flock stability metrics
-
 Record energy/battery usage
-
 Perform normal vs adversarial comparison
 
-10. Report + Blog + Final Polish
-
+### 10. Report + Blog + Final Polish
 Refactor + comment code
-
 Produce experiment plots and tables
-
 Write technical report
-
 Write 300–500 word blog post
-
 Final repo cleanup
