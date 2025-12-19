@@ -555,7 +555,7 @@ extern "C" void radio_task(void *pvParameters) {
         int64_t current_time_ms = task_start_us / 1000;
 
         // Transmit phase
-        if (current_time_ms - last_tx_time_ms >= xRadioPeriodTicks) {
+        if (current_time_ms - last_tx_time_ms >= pdTicks_TO_MS(xRadioPeriodTicks)) {
             last_tx_time_ms = current_time_ms;
             lora->standby();
 
