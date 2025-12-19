@@ -53,10 +53,10 @@ static radio_packet_t replay_packet;
 static bool has_replay_packet = false;
 #endif
 
-void capture_replay_packet(const radio_packet_t* rx_packet) {
+void capture_replay_packet(const radio_packet_t* received_pkt) {
 #ifdef ENABLE_REPLAY_ATTACK
     if (!has_replay_packet) {
-        memcpy(&replay_packet, rx_packet, sizeof(radio_packet_t));
+        memcpy(&replay_packet, received_pkt, sizeof(radio_packet_t));
         has_replay_packet = true;
         int64_t timestamp_ms = esp_timer_get_time() / 1000;
         ESP_LOGW(TAG, "ATTACK: Replay Packet Captured, timestamp_ms=%lld", (long long)timestamp_ms);
@@ -155,7 +155,7 @@ static void log_energy_use(const char* component, float energy_uj, int64_t durat
              component, energy_uj, (long long)duration_us, avg_power_mw);
 }
 
-void set_metric_logging(bool enabled) {
+void enable_logging(bool enabled) {
     const char* metric_tags[] = {
         "METRIC_LATENCY",
         "METRIC_JITTER",
@@ -532,15 +532,17 @@ void flocking_task(void *pvParameters) {
 
 extern "C" void radio_task(void *pvParameters) {
     drone_state_t local_state_copy;
-    radio_packet_t rx_packet;
-    radio_packet_t tx_packet;
-    uint8_t rx_buffer[sizeof(radio_packet_t)];
-    
-    // Buffer for Node ID (Real or Fake)
-    uint8_t tx_node_id[6]; 
-    (void)rx_packet;
-    (void)rx_buffer;
-    (void)tx_node_id;
+
+    // Initialize received packet
+    radio_packet_t received_pkt;
+    (void)received_pkt;
+    uint8_t received_buffer[sizeof(radio_packet_t)];
+    (void)received_buffer;
+
+    // Initialize transmit packet
+    radio_packet_t transmit_pkt;
+    uint8_t transmit_node_id[6];          // Buffer for Node ID
+    (void)transmit_node_id;
 
     static int64_t last_tx_time_ms = -6000;
 
@@ -567,51 +569,50 @@ extern "C" void radio_task(void *pvParameters) {
 
             // Apply Attacks to State or ID (if flag enabled)
             run_int_overflow_attack(&local_state_copy, tx_sequence);
-            run_table_overflow_attack(&local_state_copy, tx_node_id, tx_sequence);
+            run_table_overflow_attack(&local_state_copy, transmit_node_id, tx_sequence);
 
             // Generate packet
-            state_to_radio_packet(&tx_packet, &local_state_copy, tx_sequence, drone_node);
+            state_to_radio_packet(&transmit_pkt, &local_state_copy, tx_sequence, drone_node);
 
             // Apply Attacks to alter CMAC
-            run_packet_spoofing(&tx_packet, tx_sequence);
+            run_packet_spoofing(&transmit_pkt, tx_sequence);
             
             tx_sequence++;
 
             // Transmit
-            int tx_state = lora->transmit((uint8_t*)&tx_packet, sizeof(tx_packet));
+            int tx_state = lora->transmit((uint8_t*)&transmit_pkt, sizeof(transmit_pkt));
             if (tx_state == RADIOLIB_ERR_NONE) {
                 int64_t tx_dur = esp_timer_get_time() - task_start_us;
-                ESP_LOGI(TAG, "TX: Sent packet seq=%u pos=[%lu, %lu, %lu]", 
-                         (unsigned)tx_packet.seq_number,
-                         (unsigned long)tx_packet.x_mm,
-                         (unsigned long)tx_packet.y_mm,
-                         (unsigned long)tx_packet.z_mm);
+                ESP_LOGI(TAG, "TRANSMIT: Sent packet seq=%u pos=[%lu, %lu, %lu]", 
+                         (unsigned)transmit_pkt.seq_number,
+                         (unsigned long)transmit_pkt.x_mm,
+                         (unsigned long)transmit_pkt.y_mm,
+                         (unsigned long)transmit_pkt.z_mm);
                 
                 // Calculate TX energy consumption
-                float tx_current_total = ESP32_ACTIVE_CURRENT_MA + SX1276_TX_CURRENT_MA; // ESP32 + LoRa TX
-                float tx_energy_uj = calculate_energy(tx_current_total, tx_dur);
-                float tx_power_mw = SUPPLY_VOLTAGE_V * tx_current_total;
+                float out_current = ESP32_ACTIVE_CURRENT_MA + SX1276_TX_CURRENT_MA; // ESP32 + LoRa TX
+                float out_used_energy = calculate_energy(out_current, tx_dur);
+                float out_total_power = SUPPLY_VOLTAGE_V * out_current;
                 
-                // Only log energy metrics every 10 seconds
-                static int64_t last_tx_energy_log = 0;
-                static float cumulative_tx_energy_uj = 0.0f;
-                static int tx_count = 0;
+                // Log energy
+                static int64_t last_out_energy_log = 0;
+                static float cumulative_out_used_energy = 0.0f;
+                static int out_count = 0;
                 
-                cumulative_tx_energy_uj += tx_energy_uj;
-                tx_count++;
+                cumulative_out_used_energy += out_used_energy;
+                out_count++;
                 
                 int64_t current_time_ms = esp_timer_get_time() / 1000;
-                if (current_time_ms - last_tx_energy_log >= 10000) {
-                    log_energy_use("TX_TOTAL", cumulative_tx_energy_uj, tx_dur, tx_power_mw);
-                    ESP_LOGI("METRIC_ENERGY", "TX_COUNT,%d,AVG_ENERGY_PER_TX_UJ,%.2f", 
-                             tx_count, cumulative_tx_energy_uj / tx_count);
-                    last_tx_energy_log = current_time_ms;
-                    cumulative_tx_energy_uj = 0.0f;
-                    tx_count = 0;
+                if (current_time_ms - last_out_energy_log >= 10000) {
+                    log_energy_use("TRANSMIT_TOTAL", cumulative_out_used_energy, tx_dur, out_total_power);
+                    ESP_LOGI("METRIC_ENERGY", "%d,AVG_ENERGY_PER_TRANSMIT_UJ,%.2f", 
+                             out_count, cumulative_out_used_energy / out_count);
+                    last_out_energy_log = current_time_ms;
+                    cumulative_out_used_energy = 0.0f;
+                    out_count = 0;
                 }
             } else {
-                // ESP_LOGW(TAG, "TX Fail: %d (%s)", tx_state, radiolib_error_name(tx_state));
-                ESP_LOGW(TAG, "TX Fail: %d (%s)", tx_state);
+                ESP_LOGW(TAG, "Transmit Fail: %d (%s)", tx_state);
             }
             lora->startReceive();
         }
@@ -626,81 +627,82 @@ extern "C" void radio_task(void *pvParameters) {
 
         if (packet_received) {
             int64_t rx_start = esp_timer_get_time();
-            memset(rx_buffer, 0, sizeof(rx_buffer));
+            memset(received_buffer, 0, sizeof(received_buffer));
             
-            int rx_state = lora->readData(rx_buffer, sizeof(rx_buffer));
+            int received_state = lora->readData(received_buffer, sizeof(received_buffer));
 
-            if (rx_state == RADIOLIB_ERR_NONE) {
+            if (received_state == RADIOLIB_ERR_NONE) {
                 if (lora->getPacketLength() == sizeof(radio_packet_t)) {
-                    memcpy(&rx_packet, rx_buffer, sizeof(radio_packet_t));
+                    memcpy(&received_pkt, received_buffer, sizeof(radio_packet_t));
                     
                     // Filter out own packets first (before expensive CMAC verification)
-                    if (memcmp(rx_packet.node_id, drone_node, 6) != 0) {
-                        if (verify_packet(&rx_packet)) {
+                    if (memcmp(received_pkt.node_id, drone_node, 6) != 0) {
+                        if (verify_packet(&received_pkt)) {
                             // Check sequence number validity before processing (prevent protocol confusion and team spoofing)
                             // Checking CMAC ensures data integrity, was not modified by the user in the process
-                            if (is_sequence_number_valid(neighbor_table, rx_packet.node_id, rx_packet.seq_number, &global_neighbor_count)) {
-                                ESP_LOGI(TAG, "RX: Valid packet from %02x:%02x seq=%u pos=[%lu, %lu, %lu]",
-                                         rx_packet.node_id[4], rx_packet.node_id[5], 
-                                         (unsigned)rx_packet.seq_number,
-                                         (unsigned long)rx_packet.x_mm,
-                                         (unsigned long)rx_packet.y_mm,
-                                         (unsigned long)rx_packet.z_mm);
+                            if (is_sequence_number_valid(neighbor_table, received_pkt.node_id, received_pkt.seq_number, &global_neighbor_count)) {
+                                ESP_LOGI(TAG, "Received: Valid packet from %02x:%02x seq=%u pos=[%lu, %lu, %lu]",
+                                         received_pkt.node_id[4], received_pkt.node_id[5], 
+                                         (unsigned)received_pkt.seq_number,
+                                         (unsigned long)received_pkt.x_mm,
+                                         (unsigned long)received_pkt.y_mm,
+                                         (unsigned long)received_pkt.z_mm);
                                 
                                 // Capture for Replay Attack
-                                capture_replay_packet(&rx_packet);
+                                capture_replay_packet(&received_pkt);
 
                                 // Update State
                                 drone_state_t n_state;
-                                radio_packet_to_state(&rx_packet, &n_state);
+                                radio_packet_to_state(&received_pkt, &n_state);
                                 if (xSemaphoreTake(neighbor_table_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-                                    neighbor_table_update(neighbor_table, rx_packet.node_id, &n_state, rx_packet.seq_number, &global_neighbor_count);
+                                    neighbor_table_update(neighbor_table, received_pkt.node_id, &n_state, received_pkt.seq_number, &global_neighbor_count);
                                     neighbor_table_expire(neighbor_table, &global_neighbor_count);
                                     xSemaphoreGive(neighbor_table_mutex);
 
                                 }
                             } else {
                                 ESP_LOGW(TAG, "Blocked: Rejected duplicate/replay packet from %02x:%02x seq=%u",
-                                         rx_packet.node_id[4], rx_packet.node_id[5], (unsigned)rx_packet.seq_number);
+                                         received_pkt.node_id[4], received_pkt.node_id[5], (unsigned)received_pkt.seq_number);
                             }
                         } else {
                             // Failed if protocol version, team ID, or cmac/secret key incompatible
                             ESP_LOGW(TAG, "Blocked: Fail from %02x:%02x:%02x:%02x:%02x:%02x",
-                                     rx_packet.node_id[0], rx_packet.node_id[1], rx_packet.node_id[2],
-                                     rx_packet.node_id[3], rx_packet.node_id[4], rx_packet.node_id[5]);
+                                     received_pkt.node_id[0], received_pkt.node_id[1], received_pkt.node_id[2],
+                                     received_pkt.node_id[3], received_pkt.node_id[4], received_pkt.node_id[5]);
                         }
                     }else{
-                        ESP_LOGW(TAG, "Blocked: Rejected own packet, seq=%u", (unsigned)rx_packet.seq_number);
+                        ESP_LOGW(TAG, "Blocked: Rejected own packet, seq=%u", (unsigned)received_pkt.seq_number);
                     }
                 }
-                int64_t rx_dur = esp_timer_get_time() - rx_start;
+                int64_t in_dur = esp_timer_get_time() - rx_start;
                 
                 // Calculate RX energy consumption
-                float rx_current_total = ESP32_ACTIVE_CURRENT_MA + SX1276_RX_CURRENT_MA; // ESP32 + LoRa RX
-                float rx_energy_uj = calculate_energy(rx_current_total, rx_dur);
-                float rx_power_mw = SUPPLY_VOLTAGE_V * rx_current_total;
+                float in_current = ESP32_ACTIVE_CURRENT_MA + SX1276_RX_CURRENT_MA; // ESP32 + LoRa RX
+                float in_used_energy = calculate_energy(in_current, in_dur);
+                float out_total_power = SUPPLY_VOLTAGE_V * in_current;
                 
                 // Only log energy metrics every 10 seconds
-                static int64_t last_rx_energy_log = 0;
-                static float cumulative_rx_energy_uj = 0.0f;
-                static int rx_count = 0;
+                static int64_t last_in_energy_log = 0;
+                static float cumulative_in_used_energy = 0.0f;
+                static int in_count = 0;
                 
-                cumulative_rx_energy_uj += rx_energy_uj;
-                rx_count++;
+                cumulative_in_used_energy += in_used_energy;
+                in_count++;
                 
                 int64_t current_time_ms = esp_timer_get_time() / 1000;
-                if (current_time_ms - last_rx_energy_log >= 10000) {
-                    log_energy_use("RX_TOTAL", cumulative_rx_energy_uj, rx_dur, rx_power_mw);
-                    ESP_LOGI("METRIC_ENERGY", "RX_COUNT,%d,AVG_ENERGY_PER_RX_UJ,%.2f", 
-                             rx_count, cumulative_rx_energy_uj / rx_count);
-                    last_rx_energy_log = current_time_ms;
-                    cumulative_rx_energy_uj = 0.0f;
-                    rx_count = 0;
+                if (current_time_ms - last_in_energy_log >= 10000) {
+                    log_energy_use("RX_TOTAL", cumulative_in_used_energy, in_dur, out_total_power);
+                    ESP_LOGI("METRIC_ENERGY", "AVG_ENERGY_PER_RX_UJ,%.2f", 
+                             in_count, cumulative_in_used_energy / in_count);
+                    last_in_energy_log = current_time_ms;
+                    cumulative_in_used_energy = 0.0f;
+                    in_count = 0;
                 }
             }
             lora->startReceive();
         }
 
+        // Apply attacks for repeated packets
         run_replay_injection(lora);
         run_flooding_attack(lora, &local_state_copy, &tx_sequence, drone_node);
     }
@@ -805,7 +807,7 @@ extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting swarm simulation...");
     
-    set_metric_logging(true);
+    enable_logging(false);
 
     gpio_reset_pin((gpio_num_t)BLINK_GPIO);
     gpio_set_direction((gpio_num_t)BLINK_GPIO, GPIO_MODE_OUTPUT);
